@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meme 合约安全扫描器</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #ffffff; --bg2: #f5f5f4; --bg3: #eeecea;
+    --text: #1a1a1a; --text2: #6b7280; --text3: #9ca3af;
+    --border: rgba(0,0,0,0.12); --border2: rgba(0,0,0,0.22);
+    --radius-md: 8px; --radius-lg: 12px; --radius-xl: 16px;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --mono: 'SF Mono', 'Fira Code', monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1e; --bg2: #2c2c2e; --bg3: #3a3a3c;
+      --text: #f2f2f7; --text2: #aeaeb2; --text3: #636366;
+      --border: rgba(255,255,255,0.12); --border2: rgba(255,255,255,0.22);
+    }
+  }
+
+  body { font-family: var(--font); background: var(--bg3); color: var(--text); min-height: 100vh; padding: 2rem 1rem; }
+  .container { max-width: 800px; margin: 0 auto; }
+
+  h1 { font-size: 24px; font-weight: 700; margin-bottom: 6px; }
+  .subtitle { font-size: 13px; color: var(--text2); margin-bottom: 1.5rem; }
+
+  .card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-xl); padding: 1.25rem 1.5rem; margin-bottom: 1rem; }
+
+  .search-row { display: flex; gap: 10px; margin-bottom: 1rem; flex-wrap: wrap; }
+
+  select, input[type="text"] {
+    height: 44px; border: 0.5px solid var(--border2); border-radius: var(--radius-md);
+    background: var(--bg); color: var(--text); font-size: 14px; font-family: var(--font); outline: none;
+  }
+  select { padding: 0 12px; width: 100px; cursor: pointer; }
+  input[type="text"] { flex: 1; min-width: 220px; padding: 0 14px; font-family: var(--mono); }
+  input[type="text"]::placeholder { font-family: var(--font); color: var(--text3); }
+  input[type="text"]:focus, select:focus { box-shadow: 0 0 0 3px rgba(59,130,246,0.25); border-color: #3b82f6; }
+
+  .scan-btn {
+    height: 44px; padding: 0 22px; background: #111; color: #fff;
+    border: none; border-radius: var(--radius-md); font-size: 14px; font-weight: 600;
+    cursor: pointer; font-family: var(--font); transition: opacity 0.15s; white-space: nowrap;
+  }
+  @media (prefers-color-scheme: dark) { .scan-btn { background: #f2f2f7; color: #111; } }
+  .scan-btn:hover { opacity: 0.82; }
+  .scan-btn:active { transform: scale(0.98); }
+  .scan-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .stat-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-bottom: 1rem; }
+  .stat-item { background: var(--bg2); border-radius: var(--radius-md); padding: 12px 14px; }
+  .stat-label { font-size: 12px; color: var(--text2); margin-bottom: 4px; }
+  .stat-val { font-size: 20px; font-weight: 700; color: var(--text); }
+
+  .errbox { background: #fee2e2; color: #7f1d1d; border-radius: var(--radius-md); padding: 12px 14px; font-size: 13px; margin-bottom: 1rem; line-height: 1.7; }
+
+  .result-card { background: var(--bg); border: 1.5px solid var(--border); border-radius: var(--radius-xl); padding: 1.25rem 1.5rem; }
+  .result-card.risk-danger { border-color: #f87171; }
+  .result-card.risk-warn   { border-color: #fbbf24; }
+  .result-card.risk-safe   { border-color: #86efac; }
+
+  .token-header { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  .token-icon { width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+  .token-name { font-size: 19px; font-weight: 700; }
+  .token-sym  { font-size: 13px; color: var(--text2); font-weight: 400; }
+  .token-addr { font-size: 11px; color: var(--text3); font-family: var(--mono); margin-top: 4px; word-break: break-all; }
+
+  .badge-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+  .badge { font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 99px; letter-spacing: 0.02em; }
+  .b-danger { background: #fee2e2; color: #991b1b; }
+  .b-warn   { background: #fef3c7; color: #92400e; }
+  .b-safe   { background: #dcfce7; color: #14532d; }
+  .b-eth    { background: #dbeafe; color: #1e3a8a; }
+  .b-bsc    { background: #fef3c7; color: #78350f; }
+  .b-gray   { background: var(--bg2); color: var(--text2); border: 0.5px solid var(--border); }
+
+  .metrics-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 1rem; }
+  .metric { background: var(--bg2); border-radius: var(--radius-md); padding: 10px 12px; }
+  .metric-label { font-size: 11px; color: var(--text2); }
+  .metric-val   { font-size: 15px; font-weight: 700; color: var(--text); margin-top: 3px; }
+
+  .divider { border: none; border-top: 0.5px solid var(--border); margin: 12px 0; }
+
+  .section-title { font-size: 11px; font-weight: 700; color: var(--text2); letter-spacing: 0.07em; text-transform: uppercase; margin-bottom: 8px; }
+
+  .risk-banner { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: var(--radius-md); margin-bottom: 12px; }
+  .rb-danger { background: #fee2e2; } .rb-warn { background: #fef3c7; } .rb-safe { background: #dcfce7; } .rb-unk { background: var(--bg2); }
+  .rb-icon { font-size: 20px; flex-shrink: 0; margin-top: 1px; }
+  .rb-main { font-size: 14px; font-weight: 700; }
+  .rb-sub  { font-size: 12px; opacity: 0.75; margin-top: 3px; }
+  .rb-danger .rb-main { color: #7f1d1d; } .rb-warn .rb-main { color: #78350f; }
+  .rb-safe  .rb-main  { color: #14532d; } .rb-unk  .rb-main { color: var(--text2); }
+
+  .sec-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 6px; margin-bottom: 10px; }
+  .sec-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--radius-md); border: 0.5px solid var(--border); background: var(--bg); }
+  .sec-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .dot-safe { background: #22c55e; } .dot-warn { background: #f59e0b; } .dot-danger { background: #ef4444; } .dot-unk { background: #9ca3af; }
+  .sec-label { font-size: 12px; color: var(--text2); flex: 1; }
+  .sec-val   { font-size: 12px; font-weight: 700; }
+  .sv-safe { color: #15803d; } .sv-warn { color: #b45309; } .sv-danger { color: #b91c1c; } .sv-unk { color: var(--text3); }
+
+  .holder-info { font-size: 12px; color: var(--text2); margin-top: 8px; padding: 8px 12px; background: var(--bg2); border-radius: var(--radius-md); }
+
+  .pairs-list { margin-top: 4px; }
+  .pair-row { display: flex; justify-content: space-between; font-size: 12px; padding: 5px 0; color: var(--text2); border-bottom: 0.5px solid var(--border); }
+  .pair-row:last-child { border-bottom: none; }
+
+  .footer-links { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+  .ext-link { font-size: 12px; color: #3b82f6; text-decoration: none; padding: 5px 12px; border: 0.5px solid #93c5fd; border-radius: var(--radius-md); transition: background 0.15s; }
+  .ext-link:hover { background: #eff6ff; }
+
+  .empty   { text-align: center; padding: 3rem 0; color: var(--text2); font-size: 14px; }
+  .loading { text-align: center; padding: 2.5rem 0; color: var(--text2); font-size: 14px; }
+  .dot { display: inline-block; animation: blink 1.2s infinite; margin: 0 2px; }
+  .dot:nth-child(2) { animation-delay: 0.2s; } .dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes blink { 0%,80%,100% { opacity:0.2; } 40% { opacity:1; } }
+
+  @media (max-width: 540px) {
+    .sec-grid { grid-template-columns: 1fr; }
+    .metrics-grid { grid-template-columns: repeat(2,1fr); }
+    .stat-grid { grid-template-columns: repeat(2,1fr); }
+  }
+
+  .mode-tab {
+    height: 36px; padding: 0 18px; border-radius: 99px; font-size: 13px; font-weight: 600;
+    border: 0.5px solid var(--border2); background: var(--bg); color: var(--text2);
+    cursor: pointer; font-family: var(--font); transition: all 0.15s;
+  }
+  .mode-tab.active { background: #111; color: #fff; border-color: #111; }
+  @media (prefers-color-scheme: dark) { .mode-tab.active { background: #f2f2f7; color: #111; border-color: #f2f2f7; } }
+  .mode-tab:hover:not(.active) { background: var(--bg2); }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>🔍 Meme 合约安全扫描器</h1>
+  <p class="subtitle">OG 查询 · 貔貅检测 · 权限放弃 · 池子锁定 &nbsp;|&nbsp; 数据源：GoPlus Security + DexScreener</p>
+
+  <!-- 模式切换 Tab -->
+  <div style="display:flex;gap:8px;margin-bottom:1rem;">
+    <button class="mode-tab active" id="tabOg" onclick="switchMode('og')">🏆 OG 查询</button>
+    <button class="mode-tab" id="tabSec" onclick="switchMode('sec')">🔒 合约安全检测</button>
+  </div>
+
+  <!-- OG 查询面板 -->
+  <div id="panelOg" class="card">
+    <div style="margin-bottom:10px;">
+      <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;">查找最早部署的同名代币（OG 合约）</div>
+      <div style="font-size:12px;color:var(--text2);">输入代币名称或符号，自动找出 ETH / BSC 上最早部署的合约地址</div>
+    </div>
+    <div class="search-row">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;flex:1;">
+        <input type="text" id="ogInput" placeholder="输入代币名称，例如 SOCK、PEPE、TRUMP..." style="flex:1;min-width:180px;" />
+        <div style="display:flex;gap:6px;">
+          <label style="display:flex;align-items:center;gap:5px;font-size:13px;color:var(--text2);padding:0 4px;cursor:pointer;">
+            <input type="checkbox" id="ogEth" checked style="width:auto;height:auto;min-width:unset;"> ETH
+          </label>
+          <label style="display:flex;align-items:center;gap:5px;font-size:13px;color:var(--text2);padding:0 4px;cursor:pointer;">
+            <input type="checkbox" id="ogBsc" checked style="width:auto;height:auto;min-width:unset;"> BSC
+          </label>
+        </div>
+      </div>
+      <button class="scan-btn" id="ogBtn" onclick="searchOG()">查询 OG ↗</button>
+    </div>
+    <div id="ogErrBox" style="display:none;" class="errbox"></div>
+    <div id="ogResultArea"><div class="empty" style="padding:1.5rem 0;">输入代币名称开始查询</div></div>
+  </div>
+
+  <!-- 合约安全检测面板 -->
+  <div id="panelSec" class="card" style="display:none;">
+    <div class="search-row">
+      <select id="chainSel">
+        <option value="1">🔷 ETH</option>
+        <option value="56">🟡 BSC</option>
+      </select>
+      <input type="text" id="addrInput" placeholder="粘贴合约地址 0x..." />
+      <button class="scan-btn" id="scanBtn" onclick="scan()">扫描 ↗</button>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat-item">
+        <div class="stat-label">风险等级</div>
+        <div class="stat-val" id="stRisk" style="font-size:15px;font-weight:700;">—</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-label">市值 / FDV</div>
+        <div class="stat-val" id="stMc">—</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-label">流动性</div>
+        <div class="stat-val" id="stLiq">—</div>
+      </div>
+    </div>
+
+    <div id="errBox" style="display:none;" class="errbox"></div>
+  </div>
+
+  <div id="resultArea" style="display:none;"><div class="empty">输入合约地址后点击扫描</div></div>
+
+</div>
+<script>
+function escapeHtml(s) {
+  if (!s) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function fmtNum(n) {
+  if (!n || n===0) return '—';
+  if (n>=1e9) return '$'+(n/1e9).toFixed(2)+'B';
+  if (n>=1e6) return '$'+(n/1e6).toFixed(2)+'M';
+  if (n>=1e3) return '$'+(n/1e3).toFixed(1)+'K';
+  return '$'+Math.round(n);
+}
+function fmtDate(ts) {
+  if (!ts) return '—';
+  return new Date(ts).toLocaleDateString('zh-CN',{year:'numeric',month:'short',day:'numeric'});
+}
+function showErr(msg) { const b=document.getElementById('errBox'); b.innerHTML=msg; b.style.display='block'; }
+function hideErr() { document.getElementById('errBox').style.display='none'; }
+function setStats(risk,color,mc,liq) {
+  const el=document.getElementById('stRisk'); el.textContent=risk; el.style.color=color;
+  document.getElementById('stMc').textContent=mc;
+  document.getElementById('stLiq').textContent=liq;
+}
+
+async function scan() {
+  const addr=document.getElementById('addrInput').value.trim();
+  const chainId=document.getElementById('chainSel').value;
+  const btn=document.getElementById('scanBtn');
+  hideErr();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) { showErr('请输入有效合约地址（0x 开头，共 42 位十六进制字符）'); return; }
+  btn.disabled=true; btn.textContent='扫描中...';
+  document.getElementById('resultArea').style.display='block';
+  document.getElementById('resultArea').innerHTML='<div class="loading"><span class="dot">●</span><span class="dot">●</span><span class="dot">●</span><br><br>正在查询 GoPlus + DexScreener...</div>';
+  setStats('查询中','#9ca3af','...','...');
+  const chainName=chainId==='1'?'ethereum':'bsc';
+  let secRaw=null, dexPairs=null;
+
+  await Promise.allSettled([
+    (async()=>{
+      try {
+        const url=`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${addr.toLowerCase()}`;
+        const r=await fetch(url);
+        const d=await r.json();
+        if (d.result) { const k=Object.keys(d.result)[0]; if(k) secRaw=d.result[k]; }
+      } catch(e){ console.warn('GoPlus:',e.message); }
+    })(),
+    (async()=>{
+      try {
+        const r=await fetch(`https://api.dexscreener.com/latest/dex/tokens/${addr}`);
+        const d=await r.json();
+        if (d.pairs&&d.pairs.length>0) {
+          const on=d.pairs.filter(p=>p.chainId===chainName);
+          dexPairs=on.length>0?on:d.pairs;
+        }
+      } catch(e){ console.warn('DexScreener:',e.message); }
+    })(),
+  ]);
+
+  btn.disabled=false; btn.textContent='扫描 ↗';
+
+  if (!secRaw&&!dexPairs) {
+    showErr('<strong>两个数据源均请求失败</strong><br>可能原因：网络不可访问 gopluslabs.io / dexscreener.com<br>建议开启代理后重试，或前往官网手动查询。');
+    document.getElementById('resultArea').innerHTML='<div class="empty">暂无数据，请检查网络后重试</div>';
+    setStats('—','#9ca3af','—','—'); return;
+  }
+
+  const pair=dexPairs&&dexPairs[0];
+  const name=pair?.baseToken?.name||'未知代币';
+  const sym=pair?.baseToken?.symbol||'?';
+  const mc=pair?.fdv||pair?.marketCap||0;
+  const liq=pair?.liquidity?.usd||0;
+  const vol=pair?.volume?.h24||0;
+  const price=pair?.priceUsd||null;
+  const created=pair?.pairCreatedAt||0;
+  const dexUrl=pair?.url||`https://dexscreener.com/${chainName}/${addr}`;
+  const pc=pair?.priceChange?.h24||null;
+
+  const sec=secRaw?parseSec(secRaw):null;
+  const risk=sec?calcRisk(sec):'unknown';
+
+  const riskLabels={danger:'高危 / 貔貅',warn:'需注意',safe:'较安全',unknown:'未知（无 GoPlus）'};
+  const riskColors={danger:'#ef4444',warn:'#f59e0b',safe:'#22c55e',unknown:'#9ca3af'};
+  setStats(riskLabels[risk],riskColors[risk],fmtNum(mc),fmtNum(liq));
+
+  const initials=escapeHtml(sym.slice(0,2).toUpperCase());
+  const iconStyle=chainName==='ethereum'?'background:#dbeafe;color:#1e40af;':'background:#fef3c7;color:#92400e;';
+  const chainBadge=chainName==='ethereum'?'<span class="badge b-eth">Ethereum</span>':'<span class="badge b-bsc">BSC</span>';
+  const riskBadge=risk==='danger'
+    ?`<span class="badge b-danger">${sec?.isHoneypot||sec?.cannotSell?'🐷 貔貅合约':'⚠️ 高危'}</span>`
+    :risk==='warn'?'<span class="badge b-warn">⚡ 需注意</span>'
+    :risk==='safe'?'<span class="badge b-safe">✓ 较安全</span>'
+    :'<span class="badge b-gray">安全数据不可用</span>';
+  const pcStr=pc!==null?`<span class="badge" style="background:${pc>=0?'#dcfce7':'#fee2e2'};color:${pc>=0?'#14532d':'#7f1d1d'}">${pc>=0?'+':''}${pc.toFixed(1)}%</span>`:'';
+
+  let secHtml='';
+  if (sec) {
+    const rbClass={danger:'rb-danger',warn:'rb-warn',safe:'rb-safe',unknown:'rb-unk'}[risk];
+    const rbIcon=risk==='danger'?'🚨':risk==='warn'?'⚠️':risk==='safe'?'✅':'ℹ️';
+    const rbMain=risk==='danger'?(sec.isHoneypot||sec.cannotSell?'貔貅合约 — 买入后无法卖出！':'检测到严重风险项')
+      :risk==='warn'?'存在风险项，请谨慎操作':'未发现明显安全问题';
+    const rbSub=risk==='danger'?'极高风险，强烈建议不要买入'
+      :risk==='warn'?'中等风险，请核查以下风险项后再操作':'各项指标相对正常';
+
+    const checks=[
+      {label:'是否貔貅',     type:sec.isHoneypot||sec.cannotSell?'danger':'safe', text:sec.isHoneypot||sec.cannotSell?'是 — 无法卖出':'否',                         key:true},
+      {label:'合约权限放弃', type:sec.ownerRenounced?'safe':'warn',               text:sec.ownerRenounced?'已放弃 ✓':'未放弃 ✗',                                   key:true},
+      {label:'池子是否锁定', type:sec.lpLocked===null?'unk':sec.lpLocked?'safe':'warn', text:sec.lpLocked===null?'未知':sec.lpLocked?`已锁定 ${sec.lpPct.toFixed(0)}%`:'未锁定 ✗', key:true},
+      {label:'卖出税',       type:sec.sellTax>10?'danger':sec.sellTax>5?'warn':'safe', text:sec.sellTax+'%',                                                         key:true},
+      {label:'买入税',       type:sec.buyTax>10?'danger':sec.buyTax>5?'warn':'safe',   text:sec.buyTax+'%',                                                          key:false},
+      {label:'可增发',       type:sec.mintable?'danger':'safe',    text:sec.mintable?'是 ⚠':'否',       key:false},
+      {label:'黑名单功能',   type:sec.blacklist?'warn':'safe',     text:sec.blacklist?'有 ⚠':'无',      key:false},
+      {label:'代理合约',     type:sec.proxy?'warn':'safe',         text:sec.proxy?'是':'否',             key:false},
+      {label:'隐藏 Owner',   type:sec.hiddenOwner?'danger':'safe', text:sec.hiddenOwner?'存在 🚨':'无',  key:false},
+      {label:'开源验证',     type:sec.openSource?'safe':'warn',    text:sec.openSource?'已验证 ✓':'未开源', key:false},
+      {label:'交易冷却',     type:sec.cooldown?'warn':'safe',      text:sec.cooldown?'有':'无',          key:false},
+      {label:'自毁函数',     type:sec.selfDestruct?'danger':'safe',text:sec.selfDestruct?'有 🚨':'无',   key:false},
+    ];
+    const rc=c=>`<div class="sec-item"><div class="sec-dot dot-${c.type}"></div><span class="sec-label">${c.label}</span><span class="sec-val sv-${c.type}">${c.text}</span></div>`;
+    const keyC=checks.filter(c=>c.key), othC=checks.filter(c=>!c.key);
+    const holderHtml=sec.holderCount?`<div class="holder-info">持币地址数：<strong>${sec.holderCount.toLocaleString()}</strong>${sec.top10Pct!==null?` &nbsp;·&nbsp; Top10 持有 <strong>${sec.top10Pct.toFixed(1)}%</strong>`:''}${sec.lpPct>0?` &nbsp;·&nbsp; LP 已锁定 <strong>${sec.lpPct.toFixed(1)}%</strong>`:''}</div>`:'';
+
+    secHtml=`
+      <div class="risk-banner ${rbClass}"><span class="rb-icon">${rbIcon}</span><div><div class="rb-main">${rbMain}</div><div class="rb-sub">${rbSub}</div></div></div>
+      <div class="section-title">核心安全检测</div>
+      <div class="sec-grid">${keyC.map(rc).join('')}</div>
+      <hr class="divider">
+      <div class="section-title">其他风险项</div>
+      <div class="sec-grid">${othC.map(rc).join('')}</div>
+      ${holderHtml}`;
+  } else {
+    secHtml=`<div class="risk-banner rb-unk"><span class="rb-icon">ℹ️</span><div><div class="rb-main">GoPlus 安全数据不可用</div><div class="rb-sub">仅显示 DexScreener 市场数据，安全检测需网络可访问 gopluslabs.io</div></div></div>`;
+  }
+
+  const pairsHtml=dexPairs&&dexPairs.length>1?`
+    <hr class="divider">
+    <div class="section-title">所有交易对（${dexPairs.length}）</div>
+    <div class="pairs-list">${dexPairs.slice(0,6).map(p=>`<div class="pair-row"><span>${(p.dexId||'?').toUpperCase()} · ${p.quoteToken?.symbol||'?'} <span style="color:var(--text3);font-size:11px;">· ${p.chainId}</span></span><span>流动性 ${fmtNum(p.liquidity?.usd||0)} &nbsp; 量 ${fmtNum(p.volume?.h24||0)}</span></div>`).join('')}</div>`:'';
+
+  const scanUrl=`https://etherscan.io/address/${addr}`;
+  const gpUrl=`https://gopluslabs.io/token-security/${chainId}/${addr}`;
+
+  document.getElementById('resultArea').innerHTML=`
+    <div class="result-card risk-${risk}">
+      <div class="token-header">
+        <div class="token-icon" style="${iconStyle}">${initials}</div>
+        <div style="flex:1;min-width:0;">
+          <div class="token-name">${escapeHtml(name)} <span class="token-sym">${escapeHtml(sym)}</span></div>
+          ${price?`<div style="font-size:13px;color:var(--text2);margin-top:2px;">$${parseFloat(price).toFixed(8)} &nbsp;${pcStr}</div>`:''}
+          <div class="token-addr">${addr}</div>
+        </div>
+      </div>
+      <div class="badge-row">${chainBadge}${riskBadge}<span class="badge b-gray">创建 ${fmtDate(created)}</span></div>
+      <div class="metrics-grid">
+        <div class="metric"><div class="metric-label">市值 / FDV</div><div class="metric-val">${fmtNum(mc)}</div></div>
+        <div class="metric"><div class="metric-label">流动性</div><div class="metric-val">${fmtNum(liq)}</div></div>
+        <div class="metric"><div class="metric-label">24h 交易量</div><div class="metric-val">${fmtNum(vol)}</div></div>
+      </div>
+      <hr class="divider">
+      ${secHtml}
+      ${pairsHtml}
+      <div class="footer-links">
+        <a class="ext-link" href="${dexUrl}" target="_blank">DexScreener ↗</a>
+        <a class="ext-link" href="${gpUrl}" target="_blank">GoPlus ↗</a>
+        <a class="ext-link" href="${scanUrl}" target="_blank">${chainName==='ethereum'?'Etherscan':'BscScan'} ↗</a>
+      </div>
+    </div>`;
+}
+
+function parseSec(s) {
+  return {
+    isHoneypot:   s.is_honeypot==='1',
+    cannotSell:   s.cannot_sell_all==='1',
+    buyTax:       parseFloat(s.buy_tax||0),
+    sellTax:      parseFloat(s.sell_tax||0),
+    ownerRenounced: !s.owner_address||s.owner_address==='0x0000000000000000000000000000000000000000',
+    lpLocked:     s.lp_holders?lpLocked(s.lp_holders):null,
+    lpPct:        s.lp_holders?lpPct(s.lp_holders):0,
+    mintable:     s.is_mintable==='1',
+    proxy:        s.is_proxy==='1',
+    blacklist:    s.is_blacklisted==='1',
+    hiddenOwner:  s.hidden_owner==='1',
+    openSource:   s.is_open_source==='1',
+    cooldown:     s.trading_cooldown==='1',
+    selfDestruct: s.selfdestruct==='1',
+    holderCount:  parseInt(s.holder_count||0),
+    top10Pct:     s.holders?top10(s.holders):null,
+  };
+}
+function lpLocked(h){try{const a=typeof h==='string'?JSON.parse(h):h;return a.some(x=>x.is_locked===1);}catch(e){return null;}}
+function lpPct(h){try{const a=typeof h==='string'?JSON.parse(h):h;return a.filter(x=>x.is_locked===1).reduce((s,x)=>s+parseFloat(x.percent||0),0)*100;}catch(e){return 0;}}
+function top10(h){try{const a=typeof h==='string'?JSON.parse(h):h;return a.slice(0,10).reduce((s,x)=>s+parseFloat(x.percent||0),0)*100;}catch(e){return null;}}
+function calcRisk(s){
+  if(s.isHoneypot||s.cannotSell||s.hiddenOwner||s.selfDestruct) return 'danger';
+  if(s.sellTax>10||s.buyTax>10) return 'danger';
+  if(!s.ownerRenounced||s.proxy||s.blacklist||s.mintable) return 'warn';
+  if(s.lpLocked===false||s.sellTax>5||s.buyTax>5||s.cooldown) return 'warn';
+  return 'safe';
+}
+
+document.getElementById('addrInput').addEventListener('keydown',e=>{ if(e.key==='Enter') scan(); });
+document.getElementById('ogInput').addEventListener('keydown',e=>{ if(e.key==='Enter') searchOG(); });
+
+// ─── 模式切换 ───────────────────────────────────────────
+function switchMode(mode) {
+  const isOg = mode === 'og';
+  document.getElementById('panelOg').style.display  = isOg ? 'block' : 'none';
+  document.getElementById('panelSec').style.display = isOg ? 'none'  : 'block';
+  document.getElementById('resultArea').style.display = isOg ? 'none' : 'block';
+  document.getElementById('tabOg').classList.toggle('active', isOg);
+  document.getElementById('tabSec').classList.toggle('active', !isOg);
+}
+
+// ─── OG 查询 ────────────────────────────────────────────
+async function searchOG() {
+  const q = document.getElementById('ogInput').value.trim();
+  const useEth = document.getElementById('ogEth').checked;
+  const useBsc = document.getElementById('ogBsc').checked;
+  const btn = document.getElementById('ogBtn');
+  const errBox = document.getElementById('ogErrBox');
+  errBox.style.display = 'none';
+
+  if (!q) { errBox.innerHTML = '请输入代币名称或符号'; errBox.style.display='block'; return; }
+  if (!useEth && !useBsc) { errBox.innerHTML = '请至少选择一条链'; errBox.style.display='block'; return; }
+
+  btn.disabled = true; btn.textContent = '查询中...';
+  document.getElementById('ogResultArea').innerHTML = '<div class="loading"><span class="dot">●</span><span class="dot">●</span><span class="dot">●</span><br><br>正在搜索同名代币并按时间排序...</div>';
+
+  try {
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(q)}`);
+    if (!res.ok) throw new Error('DexScreener 请求失败');
+    const data = await res.json();
+
+    const allowedChains = [];
+    if (useEth) allowedChains.push('ethereum');
+    if (useBsc) allowedChains.push('bsc');
+
+    const pairs = (data.pairs || []).filter(p => allowedChains.includes(p.chainId));
+
+    // 每个合约地址只取一条（最早的 pair）
+    const seen = new Map();
+    for (const p of pairs) {
+      const addr = p.baseToken?.address?.toLowerCase();
+      if (!addr) continue;
+      // 名称/符号必须匹配
+      const n = (p.baseToken?.name || '').toLowerCase();
+      const s = (p.baseToken?.symbol || '').toLowerCase();
+      const kw = q.toLowerCase();
+      if (!n.includes(kw) && !s.includes(kw)) continue;
+
+      const ts = p.pairCreatedAt || Infinity;
+      if (!seen.has(addr) || ts < seen.get(addr).pairCreatedAt) {
+        seen.set(addr, p);
+      }
+    }
+
+    // 按 pairCreatedAt 升序（最早在前）
+    const tokens = [...seen.values()].sort((a,b) => {
+      const ta = a.pairCreatedAt || Infinity;
+      const tb = b.pairCreatedAt || Infinity;
+      return ta - tb;
+    });
+
+    if (tokens.length === 0) {
+      document.getElementById('ogResultArea').innerHTML = '<div class="empty">未找到匹配代币，换个关键词试试</div>';
+      btn.disabled=false; btn.textContent='查询 OG ↗'; return;
+    }
+
+    renderOGResults(tokens, q);
+  } catch(e) {
+    errBox.innerHTML = '查询失败：' + e.message + '<br>请检查网络或稍后重试';
+    errBox.style.display = 'block';
+    document.getElementById('ogResultArea').innerHTML = '<div class="empty">请重试</div>';
+  }
+  btn.disabled=false; btn.textContent='查询 OG ↗';
+}
+
+function renderOGResults(tokens, q) {
+  const show = tokens.slice(0, 20);
+  const totalLabel = tokens.length > 20
+    ? `找到 ${tokens.length} 个同名代币，显示前 20 个（按创建时间升序）`
+    : `找到 ${tokens.length} 个同名代币，按创建时间升序`;
+
+  const ogHtml    = renderOGCard(show[0], 0, true, null);
+  const otherHtml = show.slice(1).map((t, i) => renderOGCard(t, i+1, false, null)).join('');
+
+  document.getElementById('ogResultArea').innerHTML = `
+    <div style="font-size:12px;color:var(--text2);margin-bottom:12px;padding:0 2px;">${totalLabel}</div>
+    ${ogHtml}
+    ${show.length > 1 ? `<div style="font-size:11px;font-weight:700;color:var(--text2);letter-spacing:0.07em;text-transform:uppercase;margin:16px 0 8px;">其他同名代币</div>${otherHtml}` : ''}
+  `;
+
+  const ethTokens = show.filter(t => t.chainId === 'ethereum');
+  const bscTokens = show.filter(t => t.chainId === 'bsc');
+  fetchOGSecurity(ethTokens, 1);
+  fetchOGSecurity(bscTokens, 56);
+}
+
+async function fetchOGSecurity(tokens, chainId) {
+  if (!tokens.length) return;
+  // GoPlus 免费 API 批量只返回第一个地址，改为每个地址单独请求、并发执行
+  const CONCURRENCY = 5; // 每批并发 5 个，避免触发限流
+  for (let i = 0; i < tokens.length; i += CONCURRENCY) {
+    const chunk = tokens.slice(i, i + CONCURRENCY);
+    await Promise.allSettled(chunk.map(t => fetchSingleToken(t, chainId)));
+  }
+}
+
+async function fetchSingleToken(t, chainId) {
+  const addr = t.baseToken?.address;
+  if (!addr) return;
+  try {
+    const url = `https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${addr.toLowerCase()}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!data.result) { updateOGCardNoData(addr); return; }
+    const key = Object.keys(data.result)[0];
+    const sec = key ? data.result[key] : null;
+    if (sec) {
+      updateOGCardSecurity(addr, parseSec(sec));
+    } else {
+      updateOGCardNoData(addr);
+    }
+  } catch(e) {
+    updateOGCardNoData(addr);
+  }
+}
+
+function updateOGCardNoData(addr) {
+  if (!addr) return;
+  const el = document.getElementById('og-sec-' + addr.toLowerCase());
+  if (!el) return;
+  el.innerHTML = `<div style="font-size:12px;color:var(--text3);padding:6px 0;">安全数据不可用（GoPlus 无返回）</div>`;
+}
+
+function updateOGCardSecurity(addr, sec) {
+  const el = document.getElementById('og-sec-' + addr.toLowerCase());
+  if (!el) return;
+  const risk = calcRisk(sec);
+  el.innerHTML = renderSecurityInline(sec, risk);
+  // 更新卡片左边框颜色
+  const card = document.getElementById('og-card-' + addr.toLowerCase());
+  if (card) {
+    const borderColor = risk==='danger'?'#f87171':risk==='warn'?'#fbbf24':risk==='safe'?'#86efac':'var(--border)';
+    const isOG = card.dataset.isog === '1';
+    card.style.borderColor = isOG && risk !== 'danger' ? '#fbbf24' : borderColor;
+  }
+}
+
+function renderSecurityInline(sec, risk) {
+  const isHoneypot = sec.isHoneypot || sec.cannotSell;
+
+  const items = [
+    { label:'是否貔貅',     type: isHoneypot?'danger':'safe',           text: isHoneypot?'是 — 无法卖出':'否' },
+    { label:'合约权限',     type: sec.ownerRenounced?'safe':'warn',     text: sec.ownerRenounced?'已放弃':'未放弃' },
+    { label:'池子锁定',     type: sec.lpLocked===null?'unk':sec.lpLocked?'safe':'warn',
+                            text: sec.lpLocked===null?'未知':sec.lpLocked?`已锁 ${sec.lpPct.toFixed(0)}%`:'未锁定' },
+    { label:'卖出税',       type: sec.sellTax>10?'danger':sec.sellTax>5?'warn':'safe', text: sec.sellTax+'%' },
+    { label:'买入税',       type: sec.buyTax>10?'danger':sec.buyTax>5?'warn':'safe',   text: sec.buyTax+'%' },
+    { label:'可增发',       type: sec.mintable?'danger':'safe',         text: sec.mintable?'是':'否' },
+  ];
+
+  const riskColor = risk==='danger'?'#fee2e2':risk==='warn'?'#fef3c7':risk==='safe'?'#dcfce7':'var(--bg2)';
+  const riskTextColor = risk==='danger'?'#991b1b':risk==='warn'?'#92400e':risk==='safe'?'#14532d':'var(--text2)';
+  const riskLabel = risk==='danger'?(isHoneypot?'🐷 貔貅合约':'⚠️ 高危'):risk==='warn'?'⚡ 需注意':risk==='safe'?'✅ 较安全':'—';
+
+  const grid = items.map(c => `
+    <div style="display:flex;align-items:center;gap:7px;padding:6px 9px;border-radius:var(--radius-md);border:0.5px solid var(--border);background:var(--bg);">
+      <div style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:${c.type==='safe'?'#22c55e':c.type==='warn'?'#f59e0b':c.type==='danger'?'#ef4444':'#9ca3af'};"></div>
+      <span style="font-size:11px;color:var(--text2);flex:1;">${c.label}</span>
+      <span style="font-size:11px;font-weight:700;color:${c.type==='safe'?'#15803d':c.type==='warn'?'#b45309':c.type==='danger'?'#b91c1c':'var(--text3)'};">${c.text}</span>
+    </div>`).join('');
+
+  return `
+    <div style="display:flex;align-items:center;gap:8px;padding:7px 11px;border-radius:var(--radius-md);background:${riskColor};margin-bottom:8px;">
+      <span style="font-size:13px;font-weight:700;color:${riskTextColor};">${riskLabel}</span>
+      ${sec.holderCount?`<span style="font-size:11px;color:${riskTextColor};opacity:0.75;margin-left:auto;">持币地址 ${sec.holderCount.toLocaleString()}</span>`:''}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;">${grid}</div>`;
+}
+
+function renderOGCard(p, rank, isOG, sec) {
+  const addr    = p.baseToken?.address || '';
+  const addrLow = addr.toLowerCase();
+  const name    = p.baseToken?.name || '—';
+  const sym     = p.baseToken?.symbol || '?';
+  const imgUrl  = p.info?.imageUrl || null;   // DexScreener 提供的代币图标
+  const chain   = p.chainId;
+  const chainId = chain === 'ethereum' ? '1' : '56';
+  const created = p.pairCreatedAt || 0;
+  const mc      = p.fdv || p.marketCap || 0;
+  const liq     = p.liquidity?.usd || 0;
+  const vol     = p.volume?.h24 || 0;
+  const price   = p.priceUsd || null;
+  const pc      = p.priceChange?.h24 || null;
+  const dexUrl  = p.url || `https://dexscreener.com/${chain}/${addr}`;
+  const scanUrl = chain === 'ethereum' ? `https://etherscan.io/address/${addr}` : `https://bscscan.com/address/${addr}`;
+
+  // 图标：有 imageUrl 就用图片，否则用文字 initials
+  const initials   = escapeHtml(sym.slice(0,2).toUpperCase());
+  const iconBgStyle = chain === 'ethereum' ? 'background:#dbeafe;color:#1e40af;' : 'background:#fef3c7;color:#92400e;';
+  const imgId = 'img-' + addrLow;
+  const iconHtml = imgUrl
+    ? `<img id="${imgId}" src="${escapeHtml(imgUrl)}" alt="${escapeHtml(sym)}"
+           data-initials="${initials}" data-bg="${chain === 'ethereum' ? 'eth' : 'bsc'}"
+           style="width:46px;height:46px;border-radius:50%;object-fit:cover;flex-shrink:0;">`
+    : `<div class="token-icon" style="${iconBgStyle}">${initials}</div>`;
+  const chainBadge = chain === 'ethereum' ? '<span class="badge b-eth">Ethereum</span>' : '<span class="badge b-bsc">BSC</span>';
+  const pcStr = pc !== null
+    ? `<span class="badge" style="background:${pc>=0?'#dcfce7':'#fee2e2'};color:${pc>=0?'#14532d':'#7f1d1d'}">${pc>=0?'+':''}${pc.toFixed(1)}%</span>` : '';
+
+  const rankBadge = isOG
+    ? '<span class="badge" style="background:#fef3c7;color:#78350f;">🏆 OG #1</span>'
+    : `<span class="badge b-gray">#${rank+1}</span>`;
+
+  const ogBanner = isOG ? `
+    <div style="background:#fef3c7;border-radius:var(--radius-md);padding:9px 13px;margin-bottom:12px;display:flex;align-items:center;gap:10px;">
+      <span style="font-size:20px;">🏆</span>
+      <div>
+        <div style="font-size:13px;font-weight:700;color:#78350f;">OG 合约 — 最早部署</div>
+        <div style="font-size:11px;color:#92400e;margin-top:1px;">搜索结果中创建时间最早的同名代币合约</div>
+      </div>
+    </div>` : '';
+
+  const secPlaceholder = `<div style="font-size:12px;color:var(--text3);padding:8px 0;">⏳ 正在检测安全数据...</div>`;
+
+  const copyBtn    = `<button onclick="copyAddr('${addr}',this)" style="font-size:12px;color:var(--text2);background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius-md);padding:4px 10px;cursor:pointer;font-family:var(--font);">复制地址</button>`;
+  const scanThisBtn = `<button onclick="scanThis('${addr}','${chainId}')" style="font-size:12px;color:#3b82f6;background:transparent;border:0.5px solid #93c5fd;border-radius:var(--radius-md);padding:4px 10px;cursor:pointer;font-family:var(--font);">详细安全检测 🔒</button>`;
+
+  const cardBorder = isOG ? 'border-color:#fbbf24;border-width:2px;' : '';
+
+  return `
+    <div class="result-card" id="og-card-${addrLow}" data-isog="${isOG?1:0}" style="margin-bottom:10px;${cardBorder}">
+      ${ogBanner}
+      <div class="token-header">
+        ${iconHtml}
+        <div style="flex:1;min-width:0;">
+          <div class="token-name">${escapeHtml(name)} <span class="token-sym">${escapeHtml(sym)}</span></div>
+          ${price?`<div style="font-size:13px;color:var(--text2);margin-top:2px;">$${parseFloat(price).toFixed(8)} &nbsp;${pcStr}</div>`:''}
+          <div class="token-addr" style="cursor:pointer;" onclick="copyAddr('${addr}',null)" title="点击复制">${addr}</div>
+        </div>
+      </div>
+
+      <div class="badge-row">${rankBadge}${chainBadge}<span class="badge b-gray">📅 ${fmtDate(created)}</span></div>
+
+      <div class="metrics-grid">
+        <div class="metric"><div class="metric-label">市值 / FDV</div><div class="metric-val">${fmtNum(mc)}</div></div>
+        <div class="metric"><div class="metric-label">流动性</div><div class="metric-val">${fmtNum(liq)}</div></div>
+        <div class="metric"><div class="metric-label">24h 交易量</div><div class="metric-val">${fmtNum(vol)}</div></div>
+      </div>
+
+      <hr class="divider">
+      <div style="font-size:11px;font-weight:700;color:var(--text2);letter-spacing:0.06em;text-transform:uppercase;margin-bottom:8px;">安全检测</div>
+      <div id="og-sec-${addrLow}">${sec ? renderSecurityInline(sec, calcRisk(sec)) : secPlaceholder}</div>
+
+      <div class="footer-links" style="margin-top:12px;">
+        ${copyBtn}
+        ${scanThisBtn}
+        <a class="ext-link" href="${dexUrl}" target="_blank">DexScreener ↗</a>
+        <a class="ext-link" href="${scanUrl}" target="_blank">${chain==='ethereum'?'Etherscan':'BscScan'} ↗</a>
+      </div>
+    </div>`;
+}
+
+function copyAddr(addr, btn) {
+  navigator.clipboard.writeText(addr).then(() => {
+    if (btn) { btn.textContent = '已复制 ✓'; setTimeout(()=>{ btn.textContent='复制地址'; }, 1500); }
+  }).catch(() => {
+    // fallback
+    const el = document.createElement('textarea');
+    el.value = addr; document.body.appendChild(el); el.select();
+    document.execCommand('copy'); document.body.removeChild(el);
+    if (btn) { btn.textContent = '已复制 ✓'; setTimeout(()=>{ btn.textContent='复制地址'; }, 1500); }
+  });
+}
+
+function scanThis(addr, chainId) {
+  switchMode('sec');
+  document.getElementById('addrInput').value = addr;
+  document.getElementById('chainSel').value = chainId;
+  scan();
+}
+
+// 全局图片 fallback：用事件委托处理所有代币图标加载失败
+document.addEventListener('error', function(e) {
+  const img = e.target;
+  if (img.tagName !== 'IMG' || !img.dataset.initials) return;
+  const d = document.createElement('div');
+  d.className = 'token-icon';
+  d.style.cssText = img.dataset.bg === 'eth'
+    ? 'background:#dbeafe;color:#1e40af;'
+    : 'background:#fef3c7;color:#92400e;';
+  d.textContent = img.dataset.initials;
+  if (img.parentNode) img.parentNode.replaceChild(d, img);
+}, true);
+</script>
+</body>
+</html>
